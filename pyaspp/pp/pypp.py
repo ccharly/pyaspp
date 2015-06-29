@@ -1,6 +1,11 @@
 import re
+import types
+from .. import logger
 
-directive_re = re.compile('^#py.* ')
+class PPError(Exception):
+    pass
+
+directive_re = re.compile('^#py.')
 
 class Context(object):
     """ Context """
@@ -21,16 +26,38 @@ class Context(object):
     def exec_stmt(self, stmt):
         exec(stmt, self.globalz)
 
+_py_block = []
+_in_py_block = False
+
+def exec_stmt(ctx, stmt):
+    ctx.exec_stmt(stmt.lstrip())
+
 def eval_expr(ctx, expr):
     ret = ctx.eval_expr(expr)
     if hasattr(ret, '__str__'):
         print(str(ret))
 
+def begin_block(ctx, expr):
+    global _in_py_block
+    if _in_py_block:
+        raise PPError('nested py block are not allowed!')
+    _in_py_block = True
+    _py_block = []
+
+def end_block(ctx, expr):
+    global _in_py_block
+    if not _in_py_block:
+        raise PPError('closing a non-opened py block!')
+    _in_py_block = False
+    ctx.exec_stmt('\n'.join(_py_block))
+
 _kind_pattern = '#py.' # '.' mean everything
 _kind_pattern_len = len(_kind_pattern)
 
 _kinds_tbl = {
-        '=': eval_expr
+        '=': eval_expr,
+        '{': begin_block,
+        '}': end_block,
 }
 
 def _is_directive(line):
@@ -47,21 +74,28 @@ def make_context(filename, inherits_from=None):
     return Context(filename)
 
 def pp_line(ctx, line):
+    global _in_py_block
     if _is_directive(line):
         prefix, line = tuple(line.split(' ', 1))
         if _has_kind(prefix):
             kind = _get_kind(prefix)
             if kind is None:
-                print("-- Invalid kind for #py directive")
+                raise PPError("invalid kind for #py directive!")
             else:
-                _kinds_tbl[kind](ctx, line)
+                kind_fun = _kinds_tbl[kind]
+                if _in_py_block and kind_fun != end_block:
+                    raise PPError('py directives are not allowed in py block!')
+                kind_fun(ctx, line)
         else:
-            ctx.exec_stmt(line);
+            exec_stmt(ctx, line);
     else:
-        print(line)
+        if _in_py_block:
+            _py_block.append(line)
+        else:
+            print(line)
 
 def pp_file(filename):
     ctx = make_context(filename)
     with open(filename, 'r') as f:
         for line in f:
-            pp_line(ctx, line.replace('\n', ''))
+            pp_line(ctx, line.replace('\n', ' ')) # replace '\n' to ' ' so that the line.split will work
