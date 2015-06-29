@@ -34,7 +34,12 @@ def exec_stmt(ctx, stmt):
 
 def eval_expr(ctx, expr):
     ret = ctx.eval_expr(expr)
-    if hasattr(ret, '__str__'):
+    if ret is None:
+        return
+    if isinstance(ret, types.GeneratorType):
+        for step in ret:
+            print(str(step))
+    elif hasattr(ret, '__str__'):
         print(str(ret))
 
 def begin_block(ctx, expr):
