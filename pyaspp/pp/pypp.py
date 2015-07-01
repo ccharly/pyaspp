@@ -1,5 +1,7 @@
 import re
+import os
 import types
+import bunch
 from .. import logger
 
 class PPError(Exception):
@@ -10,15 +12,16 @@ directive_re = re.compile('^#py.')
 class Context(object):
     """ Context """
 
-    filename = None
     globalz = {}
+    loc = bunch.Bunch()
 
     def __init__(self, filename):
-        self.filename = filename
         self.exec_stmt('import sys, os')
         self.exec_stmt('_PYASPP_ROOT = os.path.abspath(os.path.dirname(sys.argv[0]))')
         self.eval_expr('sys.path.append(_PYASPP_ROOT + "/pyaspp/pp" )')
         self.exec_stmt('import cpp')
+        self.loc.line = 1
+        self.loc.filename = filename
 
     def eval_expr(self, expr):
         return eval(expr, self.globalz)
@@ -75,6 +78,10 @@ def _get_kind(prefix):
     kind = prefix[_kind_pattern_len - 1]
     return kind if kind in _kinds_tbl else None
 
+def print_loc(ctx, plus=0):
+    loc = ctx.loc.line + plus
+    print('#line {} "{}"'.format(loc, ctx.loc.filename))
+
 def make_context(filename, inherits_from=None):
     return Context(filename)
 
@@ -90,7 +97,16 @@ def pp_line(ctx, line):
                 kind_fun = _kinds_tbl[kind]
                 if _in_py_block and kind_fun != end_block:
                     raise PPError('py directives are not allowed in py block!')
-                kind_fun(ctx, line)
+                if kind_fun == begin_block:
+                    print_loc(ctx)
+                    kind_fun(ctx, line)
+                elif kind_fun == end_block:
+                    kind_fun(ctx, line)
+                    print_loc(ctx, 1)
+                else:
+                    print_loc(ctx)
+                    kind_fun(ctx, line)
+                    print_loc(ctx, 1)
         else:
             exec_stmt(ctx, line);
     else:
@@ -104,3 +120,4 @@ def pp_file(filename):
     with open(filename, 'r') as f:
         for line in f:
             pp_line(ctx, line.replace('\n', ' ')) # replace '\n' to ' ' so that the line.split will work
+            ctx.loc.line += 1
